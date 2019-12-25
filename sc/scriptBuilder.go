@@ -2,9 +2,7 @@ package sc
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
-	"github.com/joeqian10/neo-gogogo/crypto"
 	"github.com/joeqian10/neo-gogogo/helper"
 	"math/big"
 )
@@ -17,35 +15,35 @@ func NewScriptBuilder() ScriptBuilder {
 	return ScriptBuilder{buff: new(bytes.Buffer)}
 }
 
-//
+// ToArray converts ScriptBuilder to byte array
 func (sb *ScriptBuilder) ToArray() []byte {
 	return sb.buff.Bytes()
 }
 
-func (sb *ScriptBuilder) MakeInvocationScript(scriptHash []byte, operation string, args []ContractParameter) {
-	if len(operation) == 0 { // Neo.VM.Helper.cs: Line 28
-		l := len(args)
-		for i := l - 1; i >= 0; i-- {
-			sb.EmitPushParameter(args[i])
-		}
-		sb.EmitAppCall(scriptHash, false)
-	} else {
-		if args != nil { // Neo.VM.Helper.cs: Line 43
-			l := len(args)
-			for i := l - 1; i >= 0; i-- {
-				sb.EmitPushParameter(args[i])
-			}
-			sb.EmitPushInt(l)
-			sb.Emit(PACK)
-			sb.EmitPushString(operation)
-			sb.EmitAppCall(scriptHash, false)
-		} else { // Neo.VM.Helper.cs: Line 35
-			sb.EmitPushBool(false)
-			sb.EmitPushString(operation)
-			sb.EmitAppCall(scriptHash, false)
-		}
-	}
-}
+//func (sb *ScriptBuilder) MakeInvocationScript(scriptHash []byte, operation string, args []ContractParameter) {
+//	if len(operation) == 0 { // Neo.VM.Helper.cs: Line 28
+//		l := len(args)
+//		for i := l - 1; i >= 0; i-- {
+//			sb.EmitPushParameter(args[i])
+//		}
+//		sb.EmitAppCall(scriptHash, false)
+//	} else {
+//		if args != nil { // Neo.VM.Helper.cs: Line 43
+//			l := len(args)
+//			for i := l - 1; i >= 0; i-- {
+//				sb.EmitPushParameter(args[i])
+//			}
+//			sb.EmitPushInt(l)
+//			sb.Emit(PACK)
+//			sb.EmitPushString(operation)
+//			sb.EmitAppCall(scriptHash, false)
+//		} else { // Neo.VM.Helper.cs: Line 35
+//			sb.EmitPushBool(false)
+//			sb.EmitPushString(operation)
+//			sb.EmitAppCall(scriptHash, false)
+//		}
+//	}
+//}
 
 func (sb *ScriptBuilder) Emit(op OpCode, arg ...byte) error {
 	err := sb.buff.WriteByte(byte(op))
@@ -59,41 +57,77 @@ func (sb *ScriptBuilder) Emit(op OpCode, arg ...byte) error {
 	return err
 }
 
-func (sb *ScriptBuilder) EmitAppCall(scriptHah []byte, useTailCall bool) error {
-	if len(scriptHah) != 20 {
-		return fmt.Errorf("the length of scripthash should be 20")
-	}
-	if useTailCall {
-		return sb.Emit(TAILCALL, scriptHah...)
+func (sb *ScriptBuilder) EmitCall(offset int) error {
+	if offset < -128 || offset > 127 {
+		return sb.Emit(CALL_L, helper.IntToBytes(offset)...)
 	} else {
-		return sb.Emit(APPCALL, scriptHah...)
+		return sb.Emit(CALL, byte(offset))
 	}
 }
 
-func (sb *ScriptBuilder) EmitJump(op OpCode, offset int16) error {
-	if op != JMP && op != JMPIF && op != JMPIFNOT && op != CALL {
+func (sb *ScriptBuilder) EmitJump(op OpCode, offset int) error {
+	if op < JMP || op > JMPLE_L {
 		return fmt.Errorf("invalid OpCode")
 	}
-	b := make([]byte, 2)
-	binary.LittleEndian.PutUint16(b, uint16(offset))
-	//v := helper.VarIntFromInt16(offset)
-	return sb.Emit(op, b...)
+	if int(op)%2 == 0 && offset < -128 || offset > 127 {
+		op += 1
+	}
+	if int(op)%2 == 0 {
+		return sb.Emit(op, byte(offset))
+	} else {
+		return sb.Emit(op, helper.IntToBytes(offset)...)
+	}
 }
 
 func (sb *ScriptBuilder) EmitPushBigInt(number big.Int) error {
-	if number.Cmp(big.NewInt(-1)) == 0 {
-		return sb.Emit(PUSHM1)
-	}
-	if number.Cmp(big.NewInt(0)) == 0 {
-		return sb.Emit(PUSH0)
-	}
-	if number.Cmp(big.NewInt(0)) > 0 && number.Cmp(big.NewInt(16)) <= 0 {
+	if number.Cmp(big.NewInt(-1)) >= 0 && number.Cmp(big.NewInt(16)) <= 0 {
 		var b = byte(number.Int64())
-		return sb.Emit(PUSH1 - 1 + OpCode(b))
+		return sb.Emit(PUSH0 + OpCode(b))
 	}
 	// need little endian
-	reversed := helper.ReverseBytes(number.Bytes()) // Bytes() returns big-endian
-	return sb.EmitPushBytes(reversed)
+	data := helper.ReverseBytes(number.Bytes()) // Bytes() returns big-endian
+	if len(data) == 1 {
+		if number.Cmp(big.NewInt(128)) >= 0 && number.Cmp(big.NewInt(0xff)) <= 0 {
+			return sb.Emit(PUSHINT16, PadRight(data, 2)...)
+		} // 0b_0000_0000_1000_0000 ~ 0b_0000_0000_1111_1111, 8 -> 16 bits
+		return sb.Emit(PUSHINT8, data...)
+	}
+	if len(data) == 2 {
+		if number.Cmp(big.NewInt(65536)) >= 0 && number.Cmp(big.NewInt(0xffff)) <= 0 {
+			return sb.Emit(PUSHINT32, PadRight(data, 4)...)
+		} // 0b_0000_0000_1000_0000_0000_0000 ~ 0b_0000_0000_1111_1111_1111_1111, 16 -> 32 bits
+		return sb.Emit(PUSHINT16, data...)
+	}
+	if len(data) <= 4 {
+		if number.Cmp(big.NewInt(0x80000000)) >= 0 && number.Cmp(big.NewInt(0xffffffff)) <= 0 {
+			return sb.Emit(PUSHINT64, PadRight(data, 8)...)
+		} // 0b_0000_0000_1000_0000_0000_0000_0000_0000_0000_0000 ~ 0b_0000_0000_1111_1111_1111_1111_1111_1111_1111_1111, 32 -> 64 bits
+		return sb.Emit(PUSHINT32, PadRight(data, 4)...)
+	}
+	if len(data) <= 8 {
+		//if number.Cmp(big.NewInt(0x8000000000000000)) >= 0 && number.Cmp(big.NewInt(0xffffffffffffffff)) <= 0 {
+		//	return sb.Emit(PUSHINT128, PadRight(data, 16)...)
+		//}
+		return sb.Emit(PUSHINT64, PadRight(data, 8)...)
+	}
+	if len(data) <= 16 {
+		return sb.Emit(PUSHINT128, PadRight(data, 16)...)
+	}
+	if len(data) <= 32 {
+		return sb.Emit(PUSHINT256, PadRight(data, 32)...)
+	}
+	return fmt.Errorf("argument out of range")
+}
+
+func PadRight(data []byte, length int) []byte {
+	if len(data) >= length {
+		return data
+	}
+	newData := make([]byte, length)
+	for len(data) < length {
+		newData = append(data, byte(0))
+	}
+	return newData
 }
 
 func (sb *ScriptBuilder) EmitPushInt(number int) error {
@@ -102,9 +136,9 @@ func (sb *ScriptBuilder) EmitPushInt(number int) error {
 
 func (sb *ScriptBuilder) EmitPushBool(data bool) error {
 	if data {
-		return sb.Emit(PUSHT)
+		return sb.Emit(PUSH1)
 	} else {
-		return sb.Emit(PUSHF)
+		return sb.Emit(PUSH0)
 	}
 }
 
@@ -113,22 +147,18 @@ func (sb *ScriptBuilder) EmitPushBytes(data []byte) error {
 		return fmt.Errorf("data is empty")
 	}
 	le := len(data)
-	v := helper.VarIntFromInt(le)
 	var err error
-	if le <= int(PUSHBYTES75) {
-		sb.buff.WriteByte(byte(le))
-		sb.buff.Write(data)
-	} else if le < int(0x100) {
+	if le < int(0x100) {
 		err = sb.Emit(PUSHDATA1)
 		sb.buff.WriteByte(byte(le))
 		sb.buff.Write(data)
 	} else if le < int(0x10000) {
 		err = sb.Emit(PUSHDATA2)
-		sb.buff.Write(v.Bytes())
+		sb.buff.Write(helper.UInt16ToBytes(uint16(le)))
 		sb.buff.Write(data)
 	} else {
 		err = sb.Emit(PUSHDATA4)
-		sb.buff.Write(v.Bytes())
+		sb.buff.Write(helper.UInt32ToBytes(uint32(le)))
 		sb.buff.Write(data)
 	}
 	if err != nil {
@@ -140,6 +170,12 @@ func (sb *ScriptBuilder) EmitPushBytes(data []byte) error {
 // Convert the string to UTF8 format encoded byte array
 func (sb *ScriptBuilder) EmitPushString(data string) error {
 	return sb.EmitPushBytes([]byte(data))
+}
+
+func (sb *ScriptBuilder) EmitRaw(arg []byte) {
+	if arg != nil {
+		sb.buff.Write(arg)
+	}
 }
 
 func (sb *ScriptBuilder) EmitPushParameter(data ContractParameter) error {
@@ -190,19 +226,6 @@ func (sb *ScriptBuilder) EmitPushParameter(data ContractParameter) error {
 	return nil
 }
 
-func (sb *ScriptBuilder) EmitSysCall(api string, compress bool) error {
-	if len(api) == 0 {
-		return fmt.Errorf("argument api is empty")
-	}
-	b := []byte(api)
-	if compress {
-		b = crypto.Sha256(b)
-		b = b[0:4]
-	} else {
-		if len(b) > 252 {
-			return fmt.Errorf("argument api has a too long length")
-		}
-	}
-	arg := append([]byte{byte(len(b))}, b...)
-	return sb.Emit(SYSCALL, arg...)
+func (sb *ScriptBuilder) EmitSysCall(api uint) error {
+	return sb.Emit(SYSCALL, helper.UInt32ToBytes(uint32(api))...)
 }

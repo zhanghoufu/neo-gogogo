@@ -10,31 +10,68 @@ import (
 func TestScriptBuilder_Emit(t *testing.T) {
 	sb := NewScriptBuilder()
 	scriptHash, _ := helper.UInt160FromString("14df5d02f9a52d3e92ab8cdcce5fc76c743a9b26")
-	sb.Emit(APPCALL, scriptHash.Bytes()...)
+	sb.Emit(SYSCALL, scriptHash.Bytes()...)
 	b := sb.ToArray()
-	assert.Equal(t, "67269b3a746cc75fcedc8cab923e2da5f9025ddf14", helper.BytesToHex(b))
+	assert.Equal(t, "41269b3a746cc75fcedc8cab923e2da5f9025ddf14", helper.BytesToHex(b))
 }
 
-func TestScriptBuilder_EmitAppCall(t *testing.T) {
+func TestScriptBuilder_EmitSysCall(t *testing.T) {
 	sb := NewScriptBuilder()
-	scriptHash, _ := helper.UInt160FromString("14df5d02f9a52d3e92ab8cdcce5fc76c743a9b26")
-	sb.EmitAppCall(scriptHash.Bytes(), false)
+	sb.EmitSysCall(0xE393C875)
 	b := sb.ToArray()
-	assert.Equal(t, "67269b3a746cc75fcedc8cab923e2da5f9025ddf14", helper.BytesToHex(b))
+	assert.Equal(t, "4175c893e3", helper.BytesToHex(b))
+}
+
+func TestScriptBuilder_EmitCall(t *testing.T) {
+	sb := NewScriptBuilder()
+	sb.EmitCall(12345) // 0x3039
+	b := sb.ToArray()
+	assert.Equal(t, "3539300000", helper.BytesToHex(b))
 }
 
 func TestScriptBuilder_EmitJump(t *testing.T) {
 	sb := NewScriptBuilder()
-	sb.EmitJump(JMP, 77)
+	sb.EmitJump(JMP, 127)
+	sb.EmitJump(JMP, 2147483647)
 	b := sb.ToArray()
-	assert.Equal(t, "624d00", helper.BytesToHex(b))
+	assert.Equal(t, "227f23ffffff7f", helper.BytesToHex(b))
 }
 
 func TestScriptBuilder_EmitPushBigInt(t *testing.T) {
 	sb := NewScriptBuilder()
-	sb.EmitPushBigInt(*big.NewInt(7777777777))
+	sb.EmitPushBigInt(*big.NewInt(-1))
 	b := sb.ToArray()
-	assert.Equal(t, "05717897cf01", helper.BytesToHex(b))
+	assert.Equal(t, "0f", helper.BytesToHex(b))
+
+	sb = NewScriptBuilder()
+	sb.EmitPushBigInt(*big.NewInt(0))
+	b = sb.ToArray()
+	assert.Equal(t, "10", helper.BytesToHex(b))
+
+	sb = NewScriptBuilder()
+	sb.EmitPushBigInt(*big.NewInt(-128))
+	b = sb.ToArray()
+	assert.Equal(t, "0080", helper.BytesToHex(b)) //0b_1000_0000
+
+	sb = NewScriptBuilder()
+	sb.EmitPushBigInt(*big.NewInt(127)) //0b_0111_1111, 0b_1111_1111 = 0d_-1
+	b = sb.ToArray()
+	assert.Equal(t, "007f", helper.BytesToHex(b))
+
+	sb = NewScriptBuilder()
+	sb.EmitPushBigInt(*big.NewInt(255)) //0b_0000_0000_1111_1111
+	b = sb.ToArray()
+	assert.Equal(t, "01ff00", helper.BytesToHex(b))
+
+	sb = NewScriptBuilder()
+	sb.EmitPushBigInt(*big.NewInt(-32768)) //0b_1000_0000_0000_0000
+	b = sb.ToArray()
+	assert.Equal(t, "010080", helper.BytesToHex(b))
+
+	sb = NewScriptBuilder()
+	sb.EmitPushBigInt(*big.NewInt(32767)) //0b_1111_1111_1111_1111
+	b = sb.ToArray()
+	assert.Equal(t, "01ff7f", helper.BytesToHex(b))
 }
 
 func TestScriptBuilder_EmitPushBool(t *testing.T) {
@@ -85,49 +122,39 @@ func TestScriptBuilder_EmitPushString(t *testing.T) {
 	assert.Equal(t, "0c48656c6c6f20576f726c6421", helper.BytesToHex(b))
 }
 
-func TestScriptBuilder_EmitSysCall(t *testing.T) {
-	sb := NewScriptBuilder()
-	sb.EmitSysCall("syscall", false)
-	b := sb.ToArray()
-	assert.Equal(t, "680773797363616c6c", helper.BytesToHex(b))
 
-	sb = NewScriptBuilder()
-	sb.EmitSysCall("syscall", true)
-	b = sb.ToArray()
-	assert.Equal(t, "680444b1bb13", helper.BytesToHex(b))
-}
 
-func TestScriptBuilder_MakeInvocationScript(t *testing.T) {
-	sb := NewScriptBuilder()
-	scriptHash, _ := helper.UInt160FromString("b9d7ea3062e6aeeb3e8ad9548220c4ba1361d263")
-	sb.MakeInvocationScript(scriptHash.Bytes(), "name", []ContractParameter{})
-	b := sb.ToArray()
-	assert.Equal(t, "00c1046e616d656763d26113bac4208254d98a3eebaee66230ead7b9", helper.BytesToHex(b))
-}
+//func TestScriptBuilder_MakeInvocationScript(t *testing.T) {
+//	sb := NewScriptBuilder()
+//	scriptHash, _ := helper.UInt160FromString("b9d7ea3062e6aeeb3e8ad9548220c4ba1361d263")
+//	sb.MakeInvocationScript(scriptHash.Bytes(), "name", []ContractParameter{})
+//	b := sb.ToArray()
+//	assert.Equal(t, "00c1046e616d656763d26113bac4208254d98a3eebaee66230ead7b9", helper.BytesToHex(b))
+//}
 
-func TestScriptBuilder_MakeInvocationScript2(t *testing.T) {
-	sb := NewScriptBuilder()
-	scriptHash, _ := helper.UInt160FromString("0x43bb08d7c03ac66582079b57059108565f91ece5")
-	f, _ := helper.AddressToScriptHash("AKeLhhHm4hEUfLWVBCYRNjio9xhGJAom5G")
-	to, _ := helper.AddressToScriptHash("AdmyedL3jdw2TLvBzoUD2yU443NeKrP5t5")
-
-	cp1 := ContractParameter{
-		Type:  Hash160,
-		Value: f.Bytes(),
-	}
-	cp2 := ContractParameter{
-		Type:  Hash160,
-		Value: to.Bytes(),
-	}
-	cp3 := ContractParameter{
-		Type:  Integer,
-		Value: int64(20000000000),
-	}
-
-	sb.MakeInvocationScript(scriptHash.Bytes(), "transfer", []ContractParameter{cp1, cp2, cp3})
-	b := sb.ToArray()
-	assert.Equal(t, "0500c817a80414f157c713c1972ba426ceb4c2b10826e54047d522142a73c28a1e57d7bbd212d598715194690e29d8bc53c1087472616e7366657267e5ec915f56089105579b078265c63ac0d708bb43", helper.BytesToHex(b))
-}
+//func TestScriptBuilder_MakeInvocationScript2(t *testing.T) {
+//	sb := NewScriptBuilder()
+//	scriptHash, _ := helper.UInt160FromString("0x43bb08d7c03ac66582079b57059108565f91ece5")
+//	f, _ := helper.AddressToScriptHash("AKeLhhHm4hEUfLWVBCYRNjio9xhGJAom5G")
+//	to, _ := helper.AddressToScriptHash("AdmyedL3jdw2TLvBzoUD2yU443NeKrP5t5")
+//
+//	cp1 := ContractParameter{
+//		Type:  Hash160,
+//		Value: f.Bytes(),
+//	}
+//	cp2 := ContractParameter{
+//		Type:  Hash160,
+//		Value: to.Bytes(),
+//	}
+//	cp3 := ContractParameter{
+//		Type:  Integer,
+//		Value: int64(20000000000),
+//	}
+//
+//	sb.MakeInvocationScript(scriptHash.Bytes(), "transfer", []ContractParameter{cp1, cp2, cp3})
+//	b := sb.ToArray()
+//	assert.Equal(t, "0500c817a80414f157c713c1972ba426ceb4c2b10826e54047d522142a73c28a1e57d7bbd212d598715194690e29d8bc53c1087472616e7366657267e5ec915f56089105579b078265c63ac0d708bb43", helper.BytesToHex(b))
+//}
 
 func TestScriptBuilder_ToArray(t *testing.T) {
 	sb := NewScriptBuilder()

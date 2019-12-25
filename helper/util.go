@@ -61,10 +61,31 @@ func ReverseString(input string) string {
 	return BytesToHex(ReverseBytes(HexTobytes(input)))
 }
 
-// UInt32ToBytes ...
+// UInt16ToBytes converts uint16 to byte array
+func UInt16ToBytes(n uint16) []byte {
+	var buff = make([]byte, 2)
+	binary.LittleEndian.PutUint16(buff, n)
+	return buff
+}
+
+// UInt32ToBytes converts uint32 to byte array
 func UInt32ToBytes(n uint32) []byte {
 	var buff = make([]byte, 4)
 	binary.LittleEndian.PutUint32(buff, n)
+	return buff
+}
+
+// UInt64ToBytes converts uint32 to byte array
+func UInt64ToBytes(n uint64) []byte {
+	var buff = make([]byte, 8)
+	binary.LittleEndian.PutUint64(buff, n)
+	return buff
+}
+
+// IntToBytes ...
+func IntToBytes(n int) []byte {
+	var buff = make([]byte, 4)
+	binary.LittleEndian.PutUint32(buff, uint32(n))
 	return buff
 }
 
